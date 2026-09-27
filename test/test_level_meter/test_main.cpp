@@ -1,3 +1,4 @@
+#include <string.h>
 #include <unity.h>
 
 #include "LevelMeter.h"
@@ -57,6 +58,17 @@ void test_clear_flattens_and_bumps_the_version(void) {
     TEST_ASSERT_TRUE(m.version() != before);
 }
 
+void test_hex_lists_the_bars_oldest_first(void) {
+    LevelMeter m;
+    const int16_t loud[1] = {32767};
+    m.push(loud, 1); // newest bar: 255
+    char hex[2 * LevelMeter::kBars + 1];
+    m.toHex(hex);
+    TEST_ASSERT_EQUAL_UINT32(2 * LevelMeter::kBars, strlen(hex));
+    TEST_ASSERT_EQUAL_STRING_LEN("0000", hex, 4);
+    TEST_ASSERT_EQUAL_STRING("ff", hex + 2 * (LevelMeter::kBars - 1));
+}
+
 int main(int, char **) {
     UNITY_BEGIN();
 
@@ -65,6 +77,7 @@ int main(int, char **) {
     RUN_TEST(test_the_newest_bar_is_on_the_right);
     RUN_TEST(test_old_bars_scroll_out);
     RUN_TEST(test_clear_flattens_and_bumps_the_version);
+    RUN_TEST(test_hex_lists_the_bars_oldest_first);
 
     return UNITY_END();
 }

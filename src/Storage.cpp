@@ -130,3 +130,25 @@ bool Storage::remove(const char *name) {
     pathFor(name, path, sizeof path);
     return LittleFS.remove(path);
 }
+
+uint32_t Storage::removeAll() {
+    refresh();
+    uint32_t removed = 0;
+    for (const Entry &e : recordings_) {
+        if (remove(e.name)) {
+            ++removed;
+        }
+    }
+    refresh();
+    return removed;
+}
+
+void Storage::noteAdded(const char *name, uint32_t bytes) {
+    Entry e;
+    strlcpy(e.name, name, sizeof e.name);
+    e.bytes = bytes;
+    recordings_.insert(recordings_.begin(), e);
+    constexpr uint32_t kBlock = 4096;
+    const uint32_t used = (bytes + kBlock - 1) / kBlock * kBlock;
+    free_ = free_ > used ? free_ - used : 0;
+}

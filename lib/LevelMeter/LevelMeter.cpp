@@ -41,3 +41,13 @@ void LevelMeter::clear() {
     newest_ = kBars - 1;
     ++version_;
 }
+
+void LevelMeter::toHex(char *out) const {
+    static const char kDigits[] = "0123456789abcdef";
+    for (size_t i = 0; i < kBars; ++i) {
+        const uint8_t v = bar(i);
+        *out++ = kDigits[v >> 4];
+        *out++ = kDigits[v & 0x0F];
+    }
+    *out = '\0';
+}

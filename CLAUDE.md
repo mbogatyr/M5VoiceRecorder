@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A pocket voice recorder on the M5StickS3. KEY1 (the blue button right of the
 screen) starts and stops recording to internal flash; KEY2 (on the top edge)
 turns on an open Wi-Fi access point "Voice Recorder" with a web page at
-http://192.168.4.1 that lists, plays, downloads and deletes the recordings.
+http://192.168.4.1 that starts and stops recording and lists, plays,
+downloads and deletes the recordings (one by one or all at once).
 The device is held in landscape. Recordings are IMA ADPCM WAV, 8 kHz mono,
 about 24 minutes in total.
 
@@ -37,8 +38,8 @@ per machine and is shared by all projects.
 ## The design
 
 The screens are numbered, and the user refers to them by number. The design
-was approved as a whole (mockups in the first session) and is frozen; change
-it only when the user asks.
+was approved as a whole (mockups in the first session, screens 8, 9 and the
+web page v2 in the second) and is frozen; change it only when the user asks.
 
 | # | Screen | KEY1 zone (right edge) | KEY2 hint (top) |
 |---|---|---|---|
@@ -49,12 +50,19 @@ it only when the user asks.
 | 5 | Ready with memory full, amber | grey circle, "Full" | "▲ Wi-Fi" |
 | 6 | Preparing storage (first start) | | |
 | 7 | No microphone | | |
+| 8 | Recording with Wi-Fi on (started from the web page) = screen 2 | as on 2 | none |
+| 9 | Wi-Fi with memory full = screen 4, bottom line amber "Memory full · N recordings" | empty | "▲ Exit" |
 
 - The battery (icon and %) is in the top-left corner on every screen. There is
   no "REC" label on screen 2: the pulsing ring says it.
-- Screen 3 stays 4 s, then fades to black and screen 1 (or 5) fades in; a key
-  press on 3 only skips to that fade. 1 ↔ 4 fade the same way. The battery
-  does not fade.
+- Screen 3 stays 4 s, then fades to black and screen 1 (or 5, or 4/9 when
+  Wi-Fi is on) fades in; a key press on 3 only skips to that fade. 1 ↔ 4 fade
+  the same way. The battery does not fade.
+- While the access point is on, a small cyan Wi-Fi mark sits right of the
+  battery percentage on every screen (4, 8, 3, 9).
+- In Wi-Fi mode recording starts **from the web page only** (the user's
+  choice): KEY1 does nothing on 4 and 9, but stops a recording on 8, like on
+  2. KEY2 does nothing while recording. Wi-Fi stays on across a recording.
 - Button positions, checked against a photo of the device: KEY1 is on the
   front, right of the screen, at mid-height; KEY2 is on the top edge above
   the right third of the screen (screen x ≈ 142–232), so its hint is centred
@@ -70,11 +78,13 @@ The split into `lib/` and `src/` is not cosmetic here, it is load-bearing:
   - `WavHeader` — the 60-byte header, repair after a power cut, bytes ↔ time.
   - `Recordings` — `REC_nnnn.wav` names (also the guard for web routes),
     duration and MB formatting.
-  - `RecorderState` — modes Ready / Recording / Saved / Wifi, commands for
-    `main.cpp`, the fade timing.
+  - `RecorderState` — modes Ready / Recording / Saved plus a separate Wi-Fi
+    switch; keys and web Record/Stop go in, commands for `main.cpp` come
+    out; the fade timing.
   - `ScreenPolicy` — backlight On / Dim / Off (off after 3 min idle; while
     recording only dims after 30 s).
-  - `LevelMeter` — the waveform bars (block peak on a -60…0 dBFS scale).
+  - `LevelMeter` — the waveform bars (block peak on a -60…0 dBFS scale), also
+    as hex for the web page.
   - `BatteryFilter` — steadies the battery percentage.
   - `BlockRing` — which capture blocks are finished (from M5SpectrumAnalyzer).
 - `src/` is everything that knows about the board: `AudioCapture` (mic),
@@ -110,7 +120,12 @@ the files; browsers do not, so the web page decodes them in JavaScript.
 Writing: blocks are encoded as they arrive, written 16 at a time (4 KB, about
 1 s), and the file is synced every 10 s. The header gets its sizes on stop;
 after a power cut `Storage::repairAll()` fixes it at the next start from the
-file length. Recording stops when only `Storage::kReserveBytes` (64 KB) is
+file length. Stopping takes 0.1–0.25 s (the header rewrite makes LittleFS
+copy a flash block). `Storage::refresh()` walks the whole file system and
+takes about 0.4 s, so after a stop only `noteAdded()` updates the cached list
+and the free space (rounded to 4 KB blocks; it matched a real refresh
+exactly); real refreshes happen on Wi-Fi off, list requests from the page,
+deletions and at start-up. Recording stops when only `Storage::kReserveBytes` (64 KB) is
 left. Numbers only go up (the last one is kept in NVS), so a new recording
 never takes the name of a deleted one.
 
@@ -135,23 +150,42 @@ length matched the Mac's clock to 20 ms, with no lost blocks.
 
 ### Wi-Fi mode
 
-`WebPortal`: open access point, `WebServer` on port 80.
+`WebPortal`: open access point, `WebServer` on port 80. Requests are
+handled inside `loop()` one at a time, so the handlers call into `main.cpp`
+through `WebPortal::Hooks`; web Record/Stop go through `RecorderState` like
+the keys.
 
 | Route | |
 |---|---|
-| `GET /` | the page from `src/WebPage.h` (self-contained, light/dark) |
-| `GET /api/recordings` | `{total, free, secondsLeft, recordings: [{name, bytes, seconds}]}` |
-| `GET /rec/<name>` | the file, `Content-Disposition: attachment` |
-| `DELETE /rec/<name>` | removes it |
+| `GET /` | the page from `src/WebPage.h` (self-contained, always dark: the user's choice) |
+| `GET /api/status` | `{state, name, seconds, bytes, secondsLeft, canRecord, stoppedFull, levels}`; cheap, no file-system walk |
+| `POST /api/record`, `POST /api/stop` | start / stop; 409 with a reason when not possible |
+| `GET /api/recordings` | `{total, free, secondsLeft, recordings: [{name, bytes, seconds}]}`; the cached list while recording |
+| `DELETE /api/recordings` | Delete all (recordings only); 409 while recording |
+| `GET /rec/<name>` | the file, `Content-Disposition: attachment`; 409 while recording |
+| `DELETE /rec/<name>` | removes it; 409 while recording |
+
+While recording, play / download / delete are refused and greyed out on the
+page: `streamFile` would hold the loop for seconds and the recording would
+get gaps (the user chose this over an asynchronous server). The page polls
+`/api/status` every 400 ms while recording (timer and the same 54-bar
+waveform as the stick) and every 2 s otherwise. Delete all sits under the
+end of the list, away from Record, and asks in an in-page dialog first.
+
+Recording with the access point on (no client joined): the 1 kHz tone test
+showed no dips, jumps or lost blocks, and the noise floor rose from -60.2 to
+-58.8 dBFS.
 
 There is no captive-portal DNS on purpose: macOS would open the page in its
 captive-network sheet, which cannot download files. Switching the AP off makes
 ESP-IDF 4.4 log a couple of harmless "rxcb … failed" netif errors whatever the
 order of the calls; the radio does go off.
 
-`tools/mock_portal.py <dir>` serves the same page and routes on the Mac from a
-folder of recordings, for working on the page without joining the recorder's
-network.
+`tools/mock_portal.py <dir> [port] [--full]` serves the same page and routes
+on the Mac from a folder of recordings, fakes a running recording (timer,
+waveform) and memory full, for working on the page without joining the
+recorder's network. The screenshots of the page in `docs/screens/` come from
+it (headless Chrome).
 
 ### Rendering
 
@@ -175,10 +209,13 @@ sounds into the microphone, the firmware records them, the file comes back
 over USB and is analysed. Not over Wi-Fi: joining "Voice Recorder" would cut
 the Mac (and the Claude Code session) off the internet.
 
-Serial test hooks (lines, 115200): `r` = KEY1, `w` = KEY2, `l` list,
-`g <name>` send a file (`FILE <name> <bytes>` + raw bytes), `s` screenshot
-(`SNAP <w> <h>` + RGB565), `v <n>` show screen n for 3 s, `fill <KB>` take up
-storage with `/filler.bin` to test screen 5 (`fill 0` removes it). While
+Serial test hooks (lines, 115200): `r` = KEY1, `w` = KEY2, `wr` / `ws` =
+web Record / web Stop (records with Wi-Fi on without joining the network),
+`l` list, `g <name>` send a file (`FILE <name> <bytes>` + raw bytes), `s`
+screenshot (`SNAP <w> <h>` + RGB565), `v <n>` show screen n (1–9) for 3 s,
+`fill <KB>` take up storage with `/filler.bin` to test screens 5 and 9
+(`fill 0` removes it). A screenshot requested while a slow command (such as
+a stop) runs is taken before the next redraw. While
 recording, a line a second: `rec sps … write max … lost … data … left …`.
 
 ```bash
@@ -207,10 +244,11 @@ rebooted the board. `tools/serial_cmd.py` keeps DTR high until RTS is low
 any script that talks to the board.
 
 The Wi-Fi page is the one part not tested on the board automatically; it was
-tested with `tools/mock_portal.py` in a browser (play, delete, dark mode,
-phone width). The user checked it on the board on 2026-09-27: joining the
-network, playing in the browser, downloading and playing on the computer,
-and deleting all work.
+tested with `tools/mock_portal.py` in a browser (record, stop, delete all,
+memory full, phone width). The user checked it on the board on 2026-09-27:
+v1 (joining the network, playing in the browser, downloading and playing on
+the computer, deleting) and v2 (Record / Stop from the page, KEY1 stop on
+screen 8, the list paused while recording, Delete all) all work.
 
 ## Board specifics
 

@@ -36,6 +36,12 @@ class Storage {
     // not every loop.
     void refresh();
 
+    // A recording was just written: adds it to the cached list and takes
+    // its size, rounded up to 4 KB LittleFS blocks, off the free space.
+    // Much faster than refresh() (about 0.4 s), so the stop answers at
+    // once; the next refresh() corrects the estimate.
+    void noteAdded(const char *name, uint32_t bytes);
+
     uint32_t totalBytes() const { return total_; }
     uint32_t freeBytes() const { return free_; }
     // Free space the recorder may still fill.
@@ -54,6 +60,9 @@ class Storage {
     void nextName(char *out);
 
     bool remove(const char *name);
+
+    // Removes every recording (REC_nnnn.wav only) and returns how many.
+    uint32_t removeAll();
 
   private:
     uint32_t total_ = 0;

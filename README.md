@@ -2,7 +2,7 @@
 
 A pocket voice recorder for the [M5StickS3](https://docs.m5stack.com/en/core/StickS3).
 Press the blue button to record to the internal flash; press the side button
-to open a Wi-Fi access point and listen to, download or delete the
+to open a Wi-Fi access point and record, listen to, download or delete the
 recordings from a browser. No SD card, no app, no extra hardware.
 
 <p align="center">
@@ -16,9 +16,10 @@ recordings from a browser. No SD card, no app, no extra hardware.
   around the Stop button.
 - **About 24 minutes** of audio in the 5.9 MB of flash left after the
   firmware: IMA ADPCM WAV, 8 kHz mono, about 4 KB per second.
-- **Wi-Fi download.** KEY2 turns on an open access point, *Voice Recorder*. At
-  http://192.168.4.1 every recording is listed with its length and size, and
-  can be played in the browser, downloaded or deleted.
+- **Wi-Fi control.** KEY2 turns on an open access point, *Voice Recorder*. At
+  http://192.168.4.1 you can start and stop a recording (with a live timer
+  and waveform), and every recording is listed with its length and size, to
+  play in the browser, download, delete, or delete all at once.
 - **Survives power loss.** Files are synced every 10 seconds; if the power is
   cut mid-recording, the header is repaired at the next start and the audio
   up to the last sync plays normally.
@@ -29,7 +30,7 @@ recordings from a browser. No SD card, no app, no extra hardware.
 
 | Button | Where | What it does |
 |---|---|---|
-| KEY1 | blue, on the front, right of the screen | start / stop recording |
+| KEY1 | blue, on the front, right of the screen | start / stop recording (in Wi-Fi mode: stop only; start from the page) |
 | KEY2 | on the top edge, above the right part of the screen | Wi-Fi mode on / off |
 | Power | handled by the power chip, not the firmware | press: on / reset, double press: off, hold: download mode |
 
@@ -46,25 +47,36 @@ it. While recording, the screen never turns off; it only dims after 30 seconds.
 | **3 · Saved.** Shown for 4 seconds, then fades back to 1. | **4 · Wi-Fi.** Network name and the address to open. |
 | ![Screen 5: memory full](docs/screens/5-memory-full.png) | ![Screen 6: preparing storage](docs/screens/6-preparing.png) |
 | **5 · Memory full.** Recording is blocked until files are deleted. | **6 · First start.** The storage is formatted once. |
-| ![Screen 7: no microphone](docs/screens/7-no-microphone.png) | |
-| **7 · Error.** The microphone did not start. | |
+| ![Screen 7: no microphone](docs/screens/7-no-microphone.png) | ![Screen 8: recording with Wi-Fi on](docs/screens/8-recording-wifi.png) |
+| **7 · Error.** The microphone did not start. | **8 · Recording from the web page.** Screen 2 with the Wi-Fi mark. |
+| ![Screen 9: Wi-Fi with memory full](docs/screens/9-wifi-memory-full.png) | |
+| **9 · Wi-Fi, memory full.** Delete recordings from the page to record again. | |
+
+While Wi-Fi is on, a small Wi-Fi mark next to the battery says so on every
+screen.
 
 The screenshots are taken from the device itself over USB
 (`tools/serial_cmd.py snap`).
 
-## Getting the recordings off
+## The web page
 
 1. Press **KEY2**. The screen shows the network name and address.
 2. On a computer or phone, join the Wi-Fi network **Voice Recorder** (no
    password). While connected, that device has no internet.
 3. Open **http://192.168.4.1**.
-4. Play, download or delete. Downloaded files open in VLC, QuickTime or
-   Windows Media Player.
-5. Press **KEY2** again to switch Wi-Fi off and go back to recording.
+4. **Record** starts a recording on the stick; the page shows the timer, the
+   size, the time left and a live waveform, and **Stop** ends it (KEY1 on the
+   stick stops it too). While recording, the list waits: playing and
+   downloading would interrupt the recording.
+5. Play, download or delete recordings; **Delete all** at the bottom of the
+   list asks before it removes everything. Downloaded files open in VLC,
+   QuickTime or Windows Media Player.
+6. Press **KEY2** again to switch Wi-Fi off.
 
-<p align="center">
-  <img src="docs/screens/web-page.png" width="640" alt="The web page: storage summary and a list of recordings with play, download and delete buttons">
-</p>
+| | |
+|---|---|
+| ![The web page, ready: Record button, recordings, Delete all](docs/screens/web-ready.png) | ![The web page while recording: timer, waveform, Stop](docs/screens/web-recording.png) |
+| Ready | Recording |
 
 Recordings are named `REC_0001.wav`, `REC_0002.wav`, … The StickS3 has no
 real-time clock, so they are numbered rather than dated; numbers never repeat,

@@ -19,10 +19,20 @@ constexpr uint8_t kDimBrightness = 16;
 constexpr uint32_t kBatteryPeriodMs = 5000;
 constexpr uint32_t kStationsPeriodMs = 1000;
 
+// The web page's requests; defined further down.
+String statusJson();
+bool webRecord(String &reason);
+bool webStop(String &reason);
+
 AudioCapture audio;
 Storage storage;
 RecordingWriter writer;
-WebPortal portal(storage);
+WebPortal portal(storage, WebPortal::Hooks{
+                              [] { return writer.active(); },
+                              [] { return statusJson(); },
+                              [](String &reason) { return webRecord(reason); },
+                              [](String &reason) { return webStop(reason); },
+                          });
 Renderer renderer;
 LevelMeter meter;
 RecorderState state;
@@ -48,8 +58,8 @@ struct {
 // Test hooks over Serial (see "Self-testing on the board" in CLAUDE.md).
 bool serialKey1 = false;
 bool serialKey2 = false;
-// "v <n>" shows screen n for a few seconds, to check screens 6 and 7,
-// which otherwise appear only on the first start or on a fault.
+// "v <n>" shows screen n for a few seconds, to check screens that
+// otherwise need a fault, the first start or a full memory (6, 7, 9).
 ScreenId previewScreen = ScreenId::Ready;
 uint32_t previewUntilMs = 0;
 char command[48];
@@ -114,14 +124,17 @@ void startRecording(uint32_t now) {
 }
 
 void stopRecording() {
-    writer.stop();
+    const uint32_t start = millis();
+    writer.stop(); // 0.1-0.25 s: the header rewrite copies a flash block
+    const uint32_t closed = millis();
     strlcpy(saved.name, writer.name(), sizeof saved.name);
     saved.seconds = wav::secondsForDataBytes(writer.dataBytes());
     saved.bytes = wav::kHeaderBytes + writer.dataBytes();
-    storage.refresh();
-    Serial.printf("rec: stop %s, %u s, %u bytes, lost blocks %u\n", saved.name,
+    storage.noteAdded(saved.name, saved.bytes);
+    Serial.printf("rec: stop %s, %u s, %u bytes, lost blocks %u (close %u ms)\n", saved.name,
                   static_cast<unsigned>(saved.seconds), static_cast<unsigned>(saved.bytes),
-                  static_cast<unsigned>(audio.lostBlocks()));
+                  static_cast<unsigned>(audio.lostBlocks()),
+                  static_cast<unsigned>(closed - start));
 }
 
 void execute(Command command, uint32_t now) {
@@ -146,26 +159,31 @@ void execute(Command command, uint32_t now) {
     }
 }
 
-ScreenId screenFor(Mode mode) {
-    switch (mode) {
+ScreenId screenFor(View view) {
+    const bool room = storage.roomForRecording();
+    switch (view.mode) {
     case Mode::Recording:
-        return ScreenId::Recording;
+        return view.wifi ? ScreenId::RecordingWifi : ScreenId::Recording;
     case Mode::Saved:
         return ScreenId::Saved;
-    case Mode::Wifi:
-        return ScreenId::Wifi;
     case Mode::Ready:
     default:
-        return storage.roomForRecording() ? ScreenId::Ready : ScreenId::Full;
+        if (view.wifi) {
+            return room ? ScreenId::Wifi : ScreenId::WifiFull;
+        }
+        return room ? ScreenId::Ready : ScreenId::Full;
     }
 }
 
 void buildModel(ScreenModel &m, uint32_t now) {
     memset(&m, 0, sizeof m);
-    m.screen = screenFor(state.mode());
+    m.screen = screenFor(state.view());
     m.previous = screenFor(state.previous());
+    m.wifi = state.wifi();
     if (static_cast<int32_t>(previewUntilMs - now) > 0) {
         m.screen = m.previous = previewScreen;
+        m.wifi = previewScreen == ScreenId::Wifi || previewScreen == ScreenId::RecordingWifi ||
+                 previewScreen == ScreenId::WifiFull;
     }
     const Fade fade = state.fade(now);
     m.showPrevious = fade.showPrevious;
@@ -196,9 +214,91 @@ void buildModel(ScreenModel &m, uint32_t now) {
     m.savedBytes = saved.bytes;
     m.savedFull = state.stoppedFull();
 
-    if (state.mode() == Mode::Wifi || state.previous() == Mode::Wifi) {
+    if (state.wifi() || state.previous().wifi) {
         m.stations = stations;
     }
+}
+
+// ---- The web page ----------------------------------------------------------
+
+uint32_t secondsLeftNow() {
+    if (writer.active()) {
+        const uint32_t used = writer.dataBytes() + wav::kHeaderBytes;
+        return wav::secondsForFreeBytes(recordingBudget > used ? recordingBudget - used : 0);
+    }
+    return wav::secondsForFreeBytes(storage.recordableBytes());
+}
+
+// {state, name, seconds, bytes, secondsLeft, canRecord, stoppedFull[, levels]}
+// name/seconds/bytes: the recording in progress, or else the last one saved.
+// Cheap on purpose: the page asks for it every 400 ms while recording.
+String statusJson() {
+    const Mode mode = state.mode();
+    const bool rec = writer.active();
+    String j;
+    j.reserve(rec ? 300 : 200);
+    j += "{\"state\":\"";
+    j += mode == Mode::Recording ? "recording" : (mode == Mode::Saved ? "saved" : "ready");
+    j += "\",\"name\":\"";
+    j += rec ? writer.name() : saved.name;
+    j += "\",\"seconds\":";
+    j += rec ? wav::secondsForDataBytes(writer.dataBytes()) : saved.seconds;
+    j += ",\"bytes\":";
+    j += rec ? wav::kHeaderBytes + writer.dataBytes() : saved.bytes;
+    j += ",\"secondsLeft\":";
+    j += secondsLeftNow();
+    j += ",\"canRecord\":";
+    j += (!rec && storage.roomForRecording()) ? "true" : "false";
+    j += ",\"stoppedFull\":";
+    j += state.stoppedFull() ? "true" : "false";
+    if (rec) {
+        char hex[2 * LevelMeter::kBars + 1];
+        meter.toHex(hex);
+        j += ",\"levels\":\"";
+        j += hex;
+        j += '"';
+    }
+    j += '}';
+    return j;
+}
+
+// Record and Stop from the page go through the same state machine as the
+// keys. The handlers run inside loop(), so calling it here is safe.
+bool webRecord(String &reason) {
+    const uint32_t now = millis();
+    if (writer.active()) {
+        reason = "Already recording";
+        return false;
+    }
+    if (!storage.roomForRecording()) {
+        reason = "Memory full";
+        return false;
+    }
+    if (!state.wifi()) {
+        reason = "Wi-Fi mode is off";
+        return false;
+    }
+    Input in;
+    in.webRecord = true;
+    execute(state.update(now, in), now);
+    if (!writer.active()) {
+        reason = "The recording could not start";
+        return false;
+    }
+    return true;
+}
+
+bool webStop(String &reason) {
+    const uint32_t now = millis();
+    if (!writer.active()) {
+        reason = "Not recording";
+        return false;
+    }
+    Input in;
+    in.webStop = true;
+    in.roomLeft = writer.roomLeft();
+    execute(state.update(now, in), now);
+    return true;
 }
 
 // ---- Serial test hooks -----------------------------------------------------
@@ -269,9 +369,14 @@ void runCommand(const char *line) {
         listFiles();
     } else if (strncmp(line, "g ", 2) == 0) {
         sendFile(line + 2);
+    } else if (strcmp(line, "wr") == 0 || strcmp(line, "ws") == 0) {
+        // Web Record / web Stop without joining the network.
+        String reason;
+        const bool ok = line[1] == 'r' ? webRecord(reason) : webStop(reason);
+        Serial.printf("WEB %s\n", ok ? "ok" : reason.c_str());
     } else if (strncmp(line, "v ", 2) == 0) {
         const int n = atoi(line + 2);
-        if (n >= 1 && n <= 7) {
+        if (n >= 1 && n <= 9) {
             previewScreen = static_cast<ScreenId>(n);
             previewUntilMs = millis() + 3000;
         }
@@ -384,8 +489,11 @@ void loop() {
     const bool key1 = (awake && press1) || serialKey1;
     const bool key2 = (awake && press2) || serialKey2;
 
-    const bool roomLeft = writer.active() ? writer.roomLeft() : storage.roomForRecording();
-    execute(state.update(now, key1, key2, roomLeft), now);
+    Input in;
+    in.key1 = key1;
+    in.key2 = key2;
+    in.roomLeft = writer.active() ? writer.roomLeft() : storage.roomForRecording();
+    execute(state.update(now, in), now);
 
     const bool activity = press1 || press2 || serialKey1 || serialKey2 || portal.takeActivity();
     setBacklight(screenPolicy.update(now, activity, state.mode() == Mode::Recording));

@@ -14,6 +14,8 @@ enum class ScreenId : uint8_t {
     Full = 5,      // 5: Ready with no room left
     Preparing = 6, // 6: formatting the storage on the first start
     NoMic = 7,     // 7
+    RecordingWifi = 8, // 8: screen 2 while the access point is on
+    WifiFull = 9,      // 9: screen 4 with no room left
 };
 
 // Everything a frame shows. main.cpp fills it (after zeroing it with
@@ -26,6 +28,7 @@ struct ScreenModel {
     uint8_t fadeLevel;  // 255 = full brightness, 0 = black
 
     uint8_t batteryPercent;
+    bool wifi; // the access point is on: a small Wi-Fi mark by the battery
 
     uint32_t secondsLeft;
     uint32_t freeBytes;
@@ -82,7 +85,7 @@ class Renderer {
     void paintReady(const ScreenModel &m, bool full);
     void paintRecording(const ScreenModel &m, const LevelMeter &meter);
     void paintSaved(const ScreenModel &m);
-    void paintWifi(const ScreenModel &m);
+    void paintWifi(const ScreenModel &m, bool full);
     void paintMessage(bool error);
 
     // KEY1 zone at the right edge, KEY2 hint on the top row.

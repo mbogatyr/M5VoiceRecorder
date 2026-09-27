@@ -20,6 +20,10 @@ class LevelMeter {
     // Empties the history (a new recording starts with a flat line).
     void clear();
 
+    // The bars, oldest first, as 2 * kBars lowercase hex characters plus a
+    // terminating zero, for the web page's copy of the waveform.
+    void toHex(char *out) const;
+
     // Bumps on every push(), so the renderer knows the bars moved.
     uint32_t version() const { return version_; }
 

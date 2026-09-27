@@ -82,13 +82,17 @@ void Renderer::paint(const ScreenModel &m, const LevelMeter &meter) {
         paintReady(m, true);
         break;
     case ScreenId::Recording:
+    case ScreenId::RecordingWifi:
         paintRecording(m, meter);
         break;
     case ScreenId::Saved:
         paintSaved(m);
         break;
     case ScreenId::Wifi:
-        paintWifi(m);
+        paintWifi(m, false);
+        break;
+    case ScreenId::WifiFull:
+        paintWifi(m, true);
         break;
     case ScreenId::Preparing:
         paintMessage(false);
@@ -190,7 +194,16 @@ void Renderer::paintBattery(const ScreenModel &m) {
 
     char pct[8];
     snprintf(pct, sizeof pct, "%u%%", m.batteryPercent);
-    text(pct, 25, 4, kTiny, kGray);
+    const int pw = text(pct, 25, 4, kTiny, kGray);
+
+    if (m.wifi) {
+        // Wi-Fi mark: a dot and two arcs, 13 px wide, right of the %.
+        const uint16_t cyan = col(kCyan);
+        const int cx = 25 + pw + 10;
+        canvas_.fillCircle(cx, 11, 1, cyan);
+        canvas_.fillArc(cx, 11, 3, 4, 225, 315, cyan);
+        canvas_.fillArc(cx, 11, 6, 7, 225, 315, cyan);
+    }
 }
 
 // Screen 1, or screen 5 when the memory is full.
@@ -325,8 +338,9 @@ void Renderer::paintSaved(const ScreenModel &m) {
     text(rest, x, 103, kSmall, m.savedFull ? kAmber : kGray, baseline_left);
 }
 
-// Screen 4.
-void Renderer::paintWifi(const ScreenModel &m) {
+// Screen 4, or 9 when the memory is full. There is no KEY1 zone: in Wi-Fi
+// mode recording starts from the web page.
+void Renderer::paintWifi(const ScreenModel &m, bool full) {
     paintKey2Hint("Exit");
 
     // Wi-Fi icon: three arcs opening upwards over a dot.
@@ -357,6 +371,12 @@ void Renderer::paintWifi(const ScreenModel &m) {
 
     snprintf(s, sizeof s, "%u recording%s", static_cast<unsigned>(m.recordingCount),
              m.recordingCount == 1 ? "" : "s");
+    if (full) {
+        int x = 66 + text("Memory full", 66, 118, kSmall, kAmber, baseline_left, true);
+        x += separator(x, 118, 7, kAmber);
+        text(s, x, 118, kSmall, kAmber, baseline_left, true);
+        return;
+    }
     int x = 66 + text(s, 66, 118, kSmall, kGray, baseline_left);
     x += separator(x, 118, 7, kGray);
     char size[16];
