@@ -287,14 +287,32 @@ How this is known. Checked in M5SpectrumAnalyzer on 2026-09-27: of the six
 StickS3 firmwares on burner.m5stack.com, five, including the official
 UIFlow2.0, are full images: bootloader at 0x0 (header `e9 03 02 3f`),
 partition table at 0x8000 (`aa 50`), application at 0x10000. This project's
-merged image (with its own partition table) was flashed on its own at 0x0
-with esptool on 2026-09-27: the board booted and kept its recordings.
+v1.0.0 image has the same layout, with `firmware.bin` byte for byte at
+0x10000. It was written on its own at 0x0 with esptool `write_flash 0x0` on
+2026-09-27, the way M5Burner writes it: the board booted to screen 1, kept its
+recordings, and a 1 kHz tone recorded clean (no dips, jumps or lost blocks).
+
+The image covers NVS (0x9000–0xE000) with blank `0xFF`, so flashing it loses
+the recording counter. Names still never clash with files on the storage
+(`Storage::nextName` starts from the highest number there), but the number of
+a deleted latest recording can come back.
+
+For the upload, copy the image and the cover into `dist/` (ignored by git):
+`dist/M5VoiceRecorder-v<version>.bin` and `dist/M5VoiceRecorder-cover.png`. A
+file picker can't easily reach `.pio/`, a hidden folder. The cover is screen 2
+(`docs/screens/2-recording.png`) scaled to 1440×810 with nearest-neighbour: the
+screen is exactly 16:9, which is the shape M5Burner stores covers in.
 
 The upload form is at burner.m5stack.com/developer/firmware/upload. It asks
 for a name, a category and the supported devices (StickS3); a firmware
 description and a version description, both in Markdown; the version number
 and a link to the project; the `.bin` file; visibility (Public requires
-moderation); a cover image (a screenshot from `serial_cmd.py snap` works).
+moderation); a cover image. The upload is done through Claude in Chrome,
+where the user is signed in and files can be attached; the built-in browser
+can't attach files.
+
+v1.0.0 was uploaded on 2026-09-27 as "Voice Recorder", category Audio & Media,
+StickS3, Public, and went to review (Pending).
 
 ### The power button is handled by the PMIC, not the firmware
 

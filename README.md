@@ -135,14 +135,14 @@ src/     everything that touches the board
   AudioCapture   microphone (ES8311 codec) at 8 kHz
   RecordingWriter, Storage   files in LittleFS
   WebPortal, WebPage.h       access point, web server, the page
-  Renderer       the seven screens
+  Renderer       the nine screens
   main.cpp       wiring, serial test commands
 tools/   test and build helpers
 ```
 
 ## Testing
 
-The logic in `lib/` has 60 unit tests that run on the computer
+The logic in `lib/` has 69 unit tests that run on the computer
 (`pio test -e native`).
 
 The audio path is tested end to end on the real device: the computer plays
@@ -166,3 +166,7 @@ recordings, for working on the page without joining the recorder's network.
 
 More detail on the design decisions and on board quirks found along the way is
 in [CLAUDE.md](CLAUDE.md).
+
+## License
+
+[MIT](LICENSE)
